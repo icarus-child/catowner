@@ -1,12 +1,15 @@
 package main
 
 import (
+	"bytes"
+	"errors"
 	"io"
 	"log"
 	"os"
+	"os/exec"
 	"time"
 
-	"github.com/jogramming/dca"
+	"github.com/bogem/id3v2"
 	"github.com/kkdai/youtube/v2"
 )
 
@@ -35,14 +38,14 @@ func newSong(client *youtube.Client, link string) (err error, discordError strin
 		return err, discordError, nil
 	case <-time.After(2 * time.Second):
 		discordError = "I couldn't find a video at that link"
-		return err, discordError, nil
+		return errors.New("fetchVideoMetadata failed: Process timed out"), discordError, nil
 	}
 }
 
-func (song *Song) saveSong(client *youtube.Client, options *dca.EncodeOptions) (err error, discordError string) {
+func (song *Song) saveSong(client *youtube.Client) (err error, discordError string) {
 	os.Mkdir("songs", 0755)
-	if _, err := os.Stat("./songs/" + song.Metadata.ID + ".dca"); err == nil {
-		err := os.Chtimes("./songs/"+song.Metadata.ID+".dca", time.Now(), time.Now())
+	if _, err := os.Stat("./songs/" + song.Metadata.ID + ".mp3"); err == nil {
+		err := os.Chtimes("./songs/"+song.Metadata.ID+".mp3", time.Now(), time.Now())
 		if err != nil {
 			log.Printf("Non-fatal error occured while updating existing song file: %s", err)
 		}
@@ -60,25 +63,82 @@ func (song *Song) saveSong(client *youtube.Client, options *dca.EncodeOptions) (
 	}
 	defer ytStream.Close()
 
-	encodingSession, err := dca.EncodeMem(ytStream, options)
+	err, mp3_out := runFFMPEGFromStdin(populateStdinReader(ytStream))
 	if err != nil {
-		discordError = "Internal Error: Could not encode video to dca"
+		discordError = "Internal Error: Process ffmpeg failed"
 		return err, discordError
 	}
-	defer encodingSession.Cleanup()
 
-	file, err := os.Create("./songs/" + song.Metadata.ID + ".dca")
+	file, err := os.Create("./songs/" + song.Metadata.ID + ".mp3")
 	if err != nil {
-		discordError = "Internal Error: Could not create empty .dca file"
+		discordError = "Internal Error: Could not create empty .mp3 file"
 		return err, discordError
 	}
 	defer file.Close()
 
-	_, err = io.Copy(file, encodingSession)
+	_, err = io.Copy(file, mp3_out)
 	if err != nil {
 		discordError = "Internal Error: Could not save song to file system"
 		return err, discordError
 	}
 
+	err = song.addMP3Metadata(file)
+	if err != nil {
+		log.Printf("Non-fatal error occured while writing mp3 metadata: %s", err)
+	}
+
 	return nil, ""
+}
+
+func populateStdinReader(input io.Reader) func(io.WriteCloser) {
+	return func(stdin io.WriteCloser) {
+		defer stdin.Close()
+		io.Copy(stdin, input)
+	}
+}
+
+func populateStdinFile(file []byte) func(io.WriteCloser) {
+	return func(stdin io.WriteCloser) {
+		defer stdin.Close()
+		io.Copy(stdin, bytes.NewReader(file))
+	}
+}
+
+func runFFMPEGFromStdin(populate_stdin_func func(io.WriteCloser)) (error, *bytes.Buffer) {
+	cmd := exec.Command("ffmpeg", "-i", "pipe:0", "-f", "mp3", "pipe:1")
+	resultBuffer := new(bytes.Buffer)
+	// cmd.Stderr = os.Stderr
+	cmd.Stdout = resultBuffer
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return err, nil
+	}
+	err = cmd.Start()
+	if err != nil {
+		return err, nil
+	}
+	populate_stdin_func(stdin)
+	err = cmd.Wait()
+	if err != nil {
+		return err, nil
+	}
+
+	return nil, resultBuffer
+}
+
+func (song *Song) addMP3Metadata(file io.Reader) error {
+	tag, err := id3v2.ParseReader(file, id3v2.Options{
+		ParseFrames: []string{},
+	})
+	if err != nil {
+		return err
+	}
+	tag.SetTitle(song.Metadata.Title)
+	tag.SetArtist(song.Metadata.Author)
+
+	if err = tag.Save(); err != nil {
+		return err
+	}
+
+	return nil
 }

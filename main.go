@@ -4,17 +4,18 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"sort"
 
 	"github.com/bwmarrin/discordgo"
-	"github.com/jogramming/dca"
+	"github.com/expiteRz/dca"
 	"github.com/joho/godotenv"
 	"github.com/kkdai/youtube/v2"
 )
 
 var (
-	guildSongQueue map[string][]*Song
-	dcaOptions     *dca.EncodeOptions
-	ytClient       *youtube.Client
+	guilds     []Guild
+	dcaOptions *dca.EncodeOptions
+	ytClient   *youtube.Client
 )
 
 func main() {
@@ -36,7 +37,7 @@ func main() {
 		panic(err)
 	}
 
-	_, err = session.ApplicationCommandBulkOverwrite(App, "394662250188636161", commands)
+	_, err = session.ApplicationCommandBulkOverwrite(App, "1304757791608672287", commands)
 	if err != nil {
 		log.Fatalf("Could not register commands: %s", err)
 	}
@@ -52,12 +53,23 @@ func main() {
 
 	session.AddHandler(ready)
 	session.AddHandler(handleSlashCommands)
+	session.AddHandler(newGuild)
 	handleLoop(session)
 }
 
 func ready(session *discordgo.Session, event *discordgo.Ready) {
 	log.Printf("Logged in as %s", event.User.String())
 	session.UpdateCustomStatus("/listento")
+}
+
+func newGuild(session *discordgo.Session, event *discordgo.GuildCreate) {
+	guilds = append(guilds, Guild{
+		id:          event.ID,
+		mariahCarey: false,
+	})
+	sort.Slice(guilds, func(i, j int) bool {
+		return guilds[i].id > guilds[j].id
+	})
 }
 
 func handleLoop(session *discordgo.Session) {
