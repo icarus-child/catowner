@@ -11,7 +11,6 @@ import (
 type Guild struct {
 	id          string
 	songQueue   []*Song
-	mariahCarey bool
 	isPlaying   bool
 	skipChannel chan bool
 }
@@ -45,49 +44,20 @@ func startPlaying(session *discordgo.Session, voiceChannelID string, guild *Guil
 
 	time.Sleep(250 * time.Millisecond)
 
-	vc.Speaking(true)
 	for {
 		if len(guild.songQueue) == 0 {
 			break
 		}
 
-		type errorPackage struct {
-			err          error
-			discordError string
-		}
-
-		c1 := make(chan errorPackage, 1)
 		song := guild.songQueue[0]
-		go func() {
-			for {
-				select {
-				case <-guild.skipChannel:
-					c1 <- errorPackage{err: nil, discordError: ""}
-					return
-				default:
-					err, discordError := playSong(vc, song)
-					c1 <- errorPackage{
-						err:          err,
-						discordError: discordError,
-					}
-					return
-				}
-			}
-		}()
-
-		select {
-		case errPackage := <-c1:
-			err = errPackage.err
-			discordError = errPackage.discordError
-		}
+		err, discordError = playSong(vc, song, guild.skipChannel)
 		guild.songQueue = guild.songQueue[1:]
-
 		if err != nil {
 			break
 		}
+
 		time.Sleep(250 * time.Millisecond)
 	}
-	vc.Speaking(false)
 	vc.Disconnect()
 	if err != nil {
 		guild.songQueue = make([]*Song, 0)
@@ -97,15 +67,22 @@ func startPlaying(session *discordgo.Session, voiceChannelID string, guild *Guil
 	return nil, ""
 }
 
-func playSong(vc *discordgo.VoiceConnection, song *Song) (error, string) {
+func playSong(vc *discordgo.VoiceConnection, song *Song, skip chan bool) (error, string) {
 	err, dcaSong := song.getDCA()
 	if err != nil {
 		return err, "Internal Error: Failed to encode mp3 to dca"
 	}
 
+	vc.Speaking(true)
 	for _, buff := range dcaSong {
-		vc.OpusSend <- buff
+		select {
+		case <-skip:
+			return nil, ""
+		default:
+			vc.OpusSend <- buff
+		}
 	}
+	vc.Speaking(false)
 
 	return nil, ""
 }

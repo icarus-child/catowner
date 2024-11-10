@@ -65,7 +65,6 @@ func ready(session *discordgo.Session, event *discordgo.Ready) {
 func newGuild(session *discordgo.Session, event *discordgo.GuildCreate) {
 	guilds = append(guilds, &Guild{
 		id:          event.ID,
-		mariahCarey: false,
 		songQueue:   make([]*Song, 0),
 		isPlaying:   false,
 		skipChannel: make(chan bool),

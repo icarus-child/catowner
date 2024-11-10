@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"math"
@@ -23,7 +24,7 @@ var commands = []*discordgo.ApplicationCommand{
 		},
 	},
 	{
-		Name:        "listqueue",
+		Name:        "list",
 		Description: "List the song queue, 0 is the current song",
 	},
 	{
@@ -58,7 +59,7 @@ func handleSlashCommands(session *discordgo.Session, event *discordgo.Interactio
 	switch event.ApplicationCommandData().Name {
 	case "play":
 		playCommand(session, event, optionMap, ytClient)
-	case "listqueue":
+	case "list":
 		listQueueCommand(session, event)
 	case "skip":
 		skipCommand(session, event)
@@ -83,6 +84,11 @@ func playCommand(session *discordgo.Session, event *discordgo.InteractionCreate,
 	err, discordError, song := newSong(client, optionMap["url"].StringValue())
 	if err != nil {
 		handleError(err, discordError, session, event)
+		return
+	}
+
+	if song.Metadata.Duration.Minutes() > 30 {
+		handleError(errors.New("song too long, don't want to download that :/"), "Song is too long to play", session, event)
 		return
 	}
 
