@@ -2,7 +2,6 @@ package main
 
 import (
 	"errors"
-	"sort"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
@@ -16,14 +15,12 @@ type Guild struct {
 }
 
 func getGuildFromID(guildID string) (guild *Guild) {
-	guildIndex := sort.Search(len(guilds), func(i int) bool {
-		return guilds[i].id == guildID
-	})
-	if guildIndex == len(guilds) {
-		panic(errors.New("processing bot is being run in an unregistered guild"))
+	for _, guild := range guilds {
+		if guild.id == guildID {
+			return guild
+		}
 	}
-	guild = guilds[guildIndex]
-	return guild
+	panic(errors.New("processing bot is being run in an unregistered guild"))
 }
 
 func getUserVoiceChannel(guild *discordgo.Guild, event *discordgo.InteractionCreate) (error, string) {
@@ -54,6 +51,7 @@ func startPlaying(session *discordgo.Session, voiceChannelID string, guild *Guil
 		guild.songQueue = guild.songQueue[1:]
 		if err != nil {
 			break
+			println(guild.id)
 		}
 
 		time.Sleep(250 * time.Millisecond)
