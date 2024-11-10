@@ -12,6 +12,8 @@ import (
 	"github.com/kkdai/youtube/v2"
 )
 
+const SONG_DOWNLOAD_MAX = 1000
+
 var (
 	guilds     []*Guild
 	dcaOptions *dca.EncodeOptions

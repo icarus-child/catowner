@@ -5,9 +5,12 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
+	"io/fs"
 	"log"
 	"os"
 	"os/exec"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/bogem/id3v2"
@@ -86,6 +89,11 @@ func (song *Song) saveSong(client *youtube.Client) (err error, discordError stri
 	err = song.addMP3Metadata(file)
 	if err != nil {
 		log.Printf("Non-fatal error occured while writing mp3 metadata: %s", err)
+	}
+
+	err = checkSongCount(SONG_DOWNLOAD_MAX)
+	if err != nil {
+		log.Printf("Non-fatal error occured while removing old mp3s: %s", err)
 	}
 
 	return nil, ""
@@ -203,5 +211,48 @@ func loadSound(inBuffer *bytes.Buffer) (err error, outBuffer [][]byte) {
 
 		// Append encoded pcm data to the buffer.
 		outBuffer = append(outBuffer, InBuf)
+	}
+}
+
+func checkSongCount(maxCount int) (err error) {
+	files, err := os.ReadDir("./songs")
+	if err != nil {
+		return err
+	}
+
+	filesTruncated := make([]fs.DirEntry, 0)
+	for _, file := range files {
+		if strings.HasSuffix(file.Name(), ".mp3") {
+			filesTruncated = append(filesTruncated, file)
+		}
+	}
+	files = filesTruncated
+
+	if len(files) <= maxCount {
+		return
+	}
+	slices.SortFunc(files, func(a, b fs.DirEntry) int {
+		aInfo, _ := a.Info()
+		bInfo, _ := b.Info()
+		if aInfo.ModTime().Equal(bInfo.ModTime()) {
+			return 0
+		} else if aInfo.ModTime().Before(bInfo.ModTime()) {
+			return 1
+		} else {
+			return -1
+		}
+	})
+	for {
+		file := files[len(files)-1]
+		files = files[:len(files)-1]
+
+		err = os.Remove("./songs/" + file.Name())
+		if err != nil {
+			return err
+		}
+
+		if len(files) <= maxCount {
+			return nil
+		}
 	}
 }
