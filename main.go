@@ -37,7 +37,7 @@ func main() {
 		panic(err)
 	}
 
-	_, err = session.ApplicationCommandBulkOverwrite(App, "1304757791608672287", commands)
+	_, err = session.ApplicationCommandBulkOverwrite(App, "", commands)
 	if err != nil {
 		log.Fatalf("Could not register commands: %s", err)
 	}
