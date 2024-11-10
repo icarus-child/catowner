@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"io"
 	"log"
@@ -63,7 +64,7 @@ func (song *Song) saveSong(client *youtube.Client) (err error, discordError stri
 	}
 	defer ytStream.Close()
 
-	err, mp3_out := runFFMPEGFromStdin(populateStdinReader(ytStream))
+	err, mp3_out := runFFMPEGFromStdin(populateStdinReader(ytStream), exec.Command("ffmpeg", "-i", "pipe:0", "-f", "mp3", "pipe:1"))
 	if err != nil {
 		discordError = "Internal Error: Process ffmpeg failed"
 		return err, discordError
@@ -104,8 +105,7 @@ func populateStdinFile(file []byte) func(io.WriteCloser) {
 	}
 }
 
-func runFFMPEGFromStdin(populate_stdin_func func(io.WriteCloser)) (error, *bytes.Buffer) {
-	cmd := exec.Command("ffmpeg", "-i", "pipe:0", "-f", "mp3", "pipe:1")
+func runFFMPEGFromStdin(populate_stdin_func func(io.WriteCloser), cmd *exec.Cmd) (error, *bytes.Buffer) {
 	resultBuffer := new(bytes.Buffer)
 	// cmd.Stderr = os.Stderr
 	cmd.Stdout = resultBuffer
@@ -141,4 +141,67 @@ func (song *Song) addMP3Metadata(file io.Reader) error {
 	}
 
 	return nil
+}
+
+func (song *Song) getDCA() (error, [][]byte) {
+	songBuffer, err := os.Open("./songs/" + song.Metadata.ID + ".mp3")
+	if err != nil {
+		return err, nil
+	}
+
+	ffmpegBuff := new(bytes.Buffer)
+	ffmpeg := exec.Command("ffmpeg", "-i", "pipe:0", "-f", "s16le", "-ar", "48000", "-ac", "2", "pipe:1")
+	ffmpegStdin, _ := ffmpeg.StdinPipe()
+	ffmpeg.Stdout = ffmpegBuff
+
+	dcaBuffer := new(bytes.Buffer)
+	dca := exec.Command("dca")
+	dca.Stdout = dcaBuffer
+	dcaStdin, _ := dca.StdinPipe()
+
+	ffmpeg.Start()
+	songBuffer.WriteTo(ffmpegStdin)
+	ffmpegStdin.Close()
+	ffmpeg.Wait()
+
+	dca.Start()
+	ffmpegBuff.WriteTo(dcaStdin)
+	dcaStdin.Close()
+	dca.Wait()
+
+	err, ret := loadSound(dcaBuffer)
+	if err != nil {
+		return err, nil
+	}
+
+	return nil, ret
+}
+
+func loadSound(inBuffer *bytes.Buffer) (err error, outBuffer [][]byte) {
+	outBuffer = make([][]byte, 0)
+
+	var opuslen int16
+
+	for {
+		// Read opus frame length from dca file.
+		err = binary.Read(inBuffer, binary.LittleEndian, &opuslen)
+
+		// If this is the end of the file, just return.
+		if err == io.EOF || err == io.ErrUnexpectedEOF {
+			return nil, outBuffer
+		} else if err != nil {
+			return err, nil
+		}
+
+		// Read encoded pcm from dca file.
+		InBuf := make([]byte, opuslen)
+		err = binary.Read(inBuffer, binary.LittleEndian, &InBuf)
+		// Should not be any end of file errors
+		if err != nil {
+			return err, nil
+		}
+
+		// Append encoded pcm data to the buffer.
+		outBuffer = append(outBuffer, InBuf)
+	}
 }

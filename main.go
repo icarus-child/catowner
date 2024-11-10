@@ -13,7 +13,7 @@ import (
 )
 
 var (
-	guilds     []Guild
+	guilds     []*Guild
 	dcaOptions *dca.EncodeOptions
 	ytClient   *youtube.Client
 )
@@ -59,13 +59,16 @@ func main() {
 
 func ready(session *discordgo.Session, event *discordgo.Ready) {
 	log.Printf("Logged in as %s", event.User.String())
-	session.UpdateCustomStatus("/listento")
+	session.UpdateCustomStatus("/playsong")
 }
 
 func newGuild(session *discordgo.Session, event *discordgo.GuildCreate) {
-	guilds = append(guilds, Guild{
+	guilds = append(guilds, &Guild{
 		id:          event.ID,
 		mariahCarey: false,
+		songQueue:   make([]*Song, 0),
+		isPlaying:   false,
+		skipChannel: make(chan bool),
 	})
 	sort.Slice(guilds, func(i, j int) bool {
 		return guilds[i].id > guilds[j].id

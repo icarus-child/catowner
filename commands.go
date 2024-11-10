@@ -11,23 +11,7 @@ import (
 
 var commands = []*discordgo.ApplicationCommand{
 	{
-		Name:        "ping",
-		Description: "Bot will respond with pong",
-		Options: []*discordgo.ApplicationCommandOption{
-			{
-				Name:        "message",
-				Description: "Will be repeated back to you",
-				Type:        discordgo.ApplicationCommandOptionString,
-			},
-			{
-				Name:        "author",
-				Description: "Whether to prepend message's author",
-				Type:        discordgo.ApplicationCommandOptionBoolean,
-			},
-		},
-	},
-	{
-		Name:        "playsong",
+		Name:        "play",
 		Description: "Add a song from YouTube to the queue, the bot will join the user's call and begin playing",
 		Options: []*discordgo.ApplicationCommandOption{
 			{
@@ -39,8 +23,12 @@ var commands = []*discordgo.ApplicationCommand{
 		},
 	},
 	{
-		Name:        "join",
-		Description: "Join or move to the sender's voice channel [TESTING COMMAND]",
+		Name:        "listqueue",
+		Description: "List the song queue, 0 is the current song",
+	},
+	{
+		Name:        "skip",
+		Description: "List the song queue, 0 is the current song",
 	},
 }
 
@@ -53,7 +41,7 @@ func handleError(err error, discordError string, session *discordgo.Session, eve
 		},
 	})
 	if err != nil {
-		panic(err)
+		log.Println("Failed to deliver above error to discord")
 	}
 }
 
@@ -68,41 +56,25 @@ func handleSlashCommands(session *discordgo.Session, event *discordgo.Interactio
 		optionMap[opt.Name] = opt
 	}
 	switch event.ApplicationCommandData().Name {
-	case "ping":
-		pingCommand(session, event, optionMap)
-	case "playsong":
+	case "play":
 		playCommand(session, event, optionMap, ytClient)
-	case "join":
-		joinCommand(session, event)
+	case "listqueue":
+		listQueueCommand(session, event)
+	case "skip":
+		skipCommand(session, event)
 	}
-}
-
-func pingCommand(session *discordgo.Session, event *discordgo.InteractionCreate, optionMap map[string]*discordgo.ApplicationCommandInteractionDataOption) {
-	response := "pong"
-	if optionMap["message"] != nil {
-		response += " " + optionMap["message"].StringValue()
-	}
-	if optionMap["author"] != nil && optionMap["author"].BoolValue() {
-		response = event.Member.Mention() + " " + response
-	}
-	session.InteractionRespond(event.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{
-			Content: response,
-		},
-	})
 }
 
 func playCommand(session *discordgo.Session, event *discordgo.InteractionCreate, optionMap map[string]*discordgo.ApplicationCommandInteractionDataOption, client *youtube.Client) {
 	guild := getGuildFromID(event.GuildID)
 
-	eventGuild, err := session.State.Guild(event.GuildID)
+	realGuild, err := session.State.Guild(event.GuildID)
 	if err != nil {
 		handleError(err, "Internal Error: Could not retrieve guild", session, event)
 		return
 	}
 
-	err, voiceChannelID := getUserVoiceChannel(eventGuild, event)
+	err, voiceChannelID := getUserVoiceChannel(realGuild, event)
 	if err != nil {
 		handleError(err, "You aren't in a voice channel I can see!", session, event)
 		return
@@ -130,29 +102,56 @@ func playCommand(session *discordgo.Session, event *discordgo.InteractionCreate,
 	})
 
 	guild.songQueue = append(guild.songQueue, song)
-	err, discordError = startPlaying(session, voiceChannelID, guild, song)
+
+	if guild.isPlaying {
+		return
+	}
+
+	guild.isPlaying = true
+	err, discordError = startPlaying(session, voiceChannelID, guild)
+	guild.isPlaying = false
 	if err != nil {
 		handleError(err, discordError, session, event)
 		return
 	}
 }
 
-func joinCommand(session *discordgo.Session, event *discordgo.InteractionCreate) {
-	eventGuild, err := session.State.Guild(event.GuildID)
-	if err != nil {
-		handleError(err, "Internal Error: Could not retrieve guild", session, event)
-		return
+func listQueueCommand(session *discordgo.Session, event *discordgo.InteractionCreate) {
+	guild := getGuildFromID(event.GuildID)
+
+	response := "**Queue:**"
+	for n, song := range guild.songQueue {
+		seconds := int(math.Floor(song.Metadata.Duration.Minutes()))
+		minutes := int(song.Metadata.Duration.Seconds() - 60*math.Floor(song.Metadata.Duration.Minutes()))
+		response += fmt.Sprintf("\n%d: %s by %s (%d:%d)", n, song.Metadata.Title, song.Metadata.Author, seconds, minutes)
+	}
+	if len(guild.songQueue) == 0 {
+		response += "\nno songs in queue!"
 	}
 
-	err, voiceChannelID := getUserVoiceChannel(eventGuild, event)
-	if err != nil {
-		handleError(err, "You aren't in a voice channel I can see!", session, event)
-		return
+	session.InteractionRespond(event.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Content: response,
+		},
+	})
+}
+
+func skipCommand(session *discordgo.Session, event *discordgo.InteractionCreate) {
+	guild := getGuildFromID(event.GuildID)
+
+	var response string
+	if guild.isPlaying {
+		guild.skipChannel <- true
+		response = "Skipped song"
+	} else {
+		response = "No song is playing"
 	}
 
-	_, err = session.ChannelVoiceJoin(event.GuildID, voiceChannelID, false, true)
-	if err != nil {
-		handleError(err, "Error while joining voice call", session, event)
-		return
-	}
+	session.InteractionRespond(event.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Content: response,
+		},
+	})
 }
