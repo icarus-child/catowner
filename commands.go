@@ -31,6 +31,10 @@ var commands = []*discordgo.ApplicationCommand{
 		Name:        "skip",
 		Description: "List the song queue, 0 is the current song",
 	},
+	{
+		Name:        "quit",
+		Description: "Delete the queue and leave the channel",
+	},
 }
 
 func handleError(err error, discordError string, session *discordgo.Session, event *discordgo.InteractionCreate) {
@@ -63,6 +67,8 @@ func handleSlashCommands(session *discordgo.Session, event *discordgo.Interactio
 		listQueueCommand(session, event)
 	case "skip":
 		skipCommand(session, event)
+	case "stop":
+		stopCommand(session, event)
 	}
 }
 
@@ -150,6 +156,27 @@ func skipCommand(session *discordgo.Session, event *discordgo.InteractionCreate)
 	if guild.isPlaying {
 		guild.skipChannel <- true
 		response = "Skipped song"
+	} else {
+		response = "No song is playing"
+	}
+
+	session.InteractionRespond(event.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Content: response,
+		},
+	})
+}
+
+func stopCommand(session *discordgo.Session, event *discordgo.InteractionCreate) {
+	guild := getGuildFromID(event.GuildID)
+
+	guild.songQueue = make([]*Song, 0)
+
+	var response string
+	if guild.isPlaying {
+		guild.skipChannel <- true
+		response = "Stopped playback"
 	} else {
 		response = "No song is playing"
 	}

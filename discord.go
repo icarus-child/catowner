@@ -20,7 +20,7 @@ func getGuildFromID(guildID string) (guild *Guild) {
 			return guild
 		}
 	}
-	panic(errors.New("processing bot is being run in an unregistered guild"))
+	panic(errors.New("processing bot is being run in an unregistered guild, did you add the bot correctly?"))
 }
 
 func getUserVoiceChannel(guild *discordgo.Guild, event *discordgo.InteractionCreate) (error, string) {
@@ -51,7 +51,6 @@ func startPlaying(session *discordgo.Session, voiceChannelID string, guild *Guil
 		guild.songQueue = guild.songQueue[1:]
 		if err != nil {
 			break
-			println(guild.id)
 		}
 
 		time.Sleep(250 * time.Millisecond)
